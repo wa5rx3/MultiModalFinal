@@ -1,0 +1,1 @@
+subject_id,study_id,dicom_id,split,StudyDate,StudyTime,t0,ViewPosition,is_pa,is_ap,is_lateral,is_frontal,n_images_in_study,has_single_image,has_multiple_images,image_path,exists,hadm_id,admittime,dischtime,deathtime,admission_type,admit_provider_id,admission_location,discharge_location,insurance,language,marital_status,race,edregtime,edouttime,hospital_expire_flag

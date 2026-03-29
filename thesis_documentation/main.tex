@@ -1,0 +1,54 @@
+\documentclass[
+]{elteikthesis}[2023/04/10]
+
+\title{Multimodal Pneumonia Detection from Chest X-rays and Clinical Data using MIMIC-CXR and MIMIC-IV}
+\date{2026}
+
+\author{Yazan Al-Dabain}
+\degree{Computer Science BSc}
+
+\supervisor{Dr Arafat Md Easin}
+\affiliation{Assistant Lecturer}
+
+\university{Eötvös Loránd University}
+\faculty{Faculty of Informatics}
+\department{Dept. of Software Technology and Methodology}
+\city{Budapest}
+\logo{elte_cimer_szines}
+
+\addbibresource{references.bib}
+
+\usepackage{tikz}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{verbatim}
+\usetikzlibrary{calc, positioning, arrows.meta}
+
+\begin{document}
+
+\documentlang{english}
+
+\maketitle
+\tableofcontents
+\cleardoublepage
+
+\input{chapters/01_introduction}
+\input{chapters/02_related_work}
+\input{chapters/03_data_and_cohort_construction}
+\input{chapters/04_methods}
+\input{chapters/05_results}
+\input{chapters/06_discussion}
+\input{chapters/07_conclusion}
+
+\appendix
+\input{chapters/A_feature_dictionary}
+\input{chapters/B_implementation_details}
+\input{chapters/C_additional_figures}
+
+\printbibliography
+
+\listoffigures
+\listoftables
+
+\end{document}

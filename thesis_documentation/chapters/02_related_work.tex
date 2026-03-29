@@ -1,0 +1,33 @@
+\chapter{Related Work}
+
+\section{Chest X-ray Pneumonia Detection}
+
+A large body of work formulates chest radiograph analysis as a supervised visual classification problem, most commonly using convolutional neural networks trained on datasets that pair images with structured labels. Resources such as MIMIC-CXR and CheXpert are widely adopted due to their scale, standardized label ontology, and compatibility with deep learning workflows. A common approach is to train models on multiple radiographic findings using multilabel supervision and subsequently adapt them to a narrower clinical endpoint such as pneumonia. This strategy typically produces strong image-only baselines, which any multimodal system must match or exceed to justify additional complexity.
+
+The present thesis follows this paradigm for the imaging branch. A DenseNet121 encoder is trained under CheXpert-style multilabel supervision with an explicit masking policy for uncertain labels, and subsequently fine-tuned for a binary pneumonia target consistent with the project’s label definition. This two-stage training strategy leverages broader radiographic signal during pretraining while aligning the final model with the specific downstream task.
+
+\section{Clinical Prediction Models}
+
+In parallel, a substantial body of literature focuses on predicting clinical outcomes from structured electronic health record data, including emergency department (ED) triage measurements. Linear models and tree-based ensembles remain widely used due to their interpretability, robustness to heterogeneous feature types, and ability to capture nonlinear relationships.
+
+In this thesis, clinical baselines are implemented using logistic regression and gradient boosted trees (XGBoost). Logistic regression provides a transparent linear reference model, while XGBoost serves as a nonlinear baseline capable of modeling interactions between variables. Both models are trained on triage-derived features that reflect physiological state at presentation, under a strict feature policy that excludes variables not reliably available at the prediction time.
+
+Triage-based predictors are inherently constrained by missingness, limited granularity, and the absence of visual information present in imaging. Additionally, clinical datasets often contain variables that may reflect downstream decisions rather than initial patient state. In this work, such variables—particularly disposition-related fields—are explicitly excluded to prevent temporal leakage and ensure that all features correspond to information available at or before the prediction time.
+
+\section{Multimodal Learning in Medical Imaging}
+
+Multimodal learning aims to combine imaging and non-imaging data when both are available for the same clinical encounter. Early fusion approaches, which integrate learned image representations with tabular features into a joint model, are a common and practical strategy for single-timepoint prediction settings.
+
+In this thesis, multimodal fusion is implemented using an early-fusion architecture in which features extracted from the image encoder are combined with tabular clinical representations through feature concatenation and jointly optimized. Conceptually, clinical variables may provide complementary information not fully captured by the radiograph, particularly in representing physiological context.
+
+However, empirical evidence across studies suggests that improvements from multimodal fusion are not consistently observed, especially when strong image baselines are used. The benefit of multimodal integration therefore cannot be assumed a priori and must be evaluated under controlled conditions. In particular, when clinical features are restricted to pre-imaging triage data, the incremental signal available to the multimodal model may be limited, making performance gains over image-only models uncertain.
+
+\section{Limitations of Prior Work}
+
+Several limitations recur in prior work and complicate the interpretation of reported performance. A common issue is the absence of a clearly defined prediction time, leading to pipelines that incorporate variables whose temporal relationship to the imaging study is ambiguous. When predictors include information influenced by events after image acquisition, such as documentation or disposition-related fields, models may inadvertently exploit future information. This form of temporal leakage can lead to overly optimistic estimates of performance, particularly in multimodal settings where heterogeneous data sources are combined.
+
+Beyond temporal concerns, many studies do not enforce patient-level temporal splits or provide paired uncertainty estimates when comparing models. As a result, reported performance differences may not reflect statistically meaningful improvements. Additionally, calibration and decision-oriented evaluations are often omitted, limiting insight into how models would behave in practical settings. Discrimination metrics alone do not capture the reliability of predicted probabilities or their clinical utility, and different models may exhibit trade-offs between discrimination and calibration. Furthermore, clinical utility is inherently threshold-dependent, meaning that no single model may be optimal across all decision thresholds.
+
+Finally, report-derived labels such as those from CheXpert introduce inherent uncertainty and ambiguity. Pneumonia is defined within a broader multilabel ontology, uncertain annotations are common, and negative labels do not necessarily correspond to radiographically normal studies. Consequently, model performance can depend strongly on how negative cases are defined. In particular, distinguishing pneumonia from other abnormal radiographic findings is substantially more difficult than distinguishing it from normal studies, highlighting the importance of analyzing performance across different negative case compositions.
+
+These limitations directly motivate the design of this thesis. The problem is formulated with prediction anchored at the time of image acquisition ($t_0$), ensuring that only pre-imaging information is used. Clinical features are restricted to triage data to prevent temporal leakage, and all models are evaluated on a shared patient-level temporal split to enable fair comparison. Model performance is assessed not only through discrimination metrics, but also through paired bootstrap analysis, calibration evaluation, decision curve analysis, and error-oriented diagnostics. Within this framework, the central question is whether multimodal fusion provides a reliable incremental benefit over a strong image-only baseline under strict temporal and data availability constraints.

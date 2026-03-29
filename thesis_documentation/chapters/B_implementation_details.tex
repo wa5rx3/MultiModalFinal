@@ -1,0 +1,211 @@
+\chapter{Implementation Details}
+
+This appendix documents the software organization, reproducibility mechanisms, and experiment artifact structure of the repository used in this thesis. The purpose of this appendix is not to reproduce source code line by line, but to make the implementation architecture visible enough that the reader can understand how the project is organized, how experiments are tracked, and how reported results are regenerated from saved artifacts.
+
+\section{Repository Structure}
+
+The repository is organized around a separation between data processing, model training, evaluation utilities, documentation, and thesis assets. The most relevant top-level structure is shown below.
+
+\begin{verbatim}
+c:/MultiModalFinal
+|-- artifacts/
+|   |-- manifests/
+|   |-- models/
+|   |-- evaluation/
+|   |-- interpretability/
+|   `-- runs/registry.json
+|-- configs/
+|   |-- experiments/
+|   `-- paths.local.example.yaml
+|-- docs/
+|   |-- runbook.md
+|   |-- current_state.md
+|   |-- cohort_definition.md
+|   |-- project_definition.md
+|   `-- triage_feature_policy.md
+|-- scripts/
+|   |-- generate_gradcam_examples.py
+|   |-- evaluate_normal_vs_abnormal_negatives.py
+|   |-- check_prediction_behavior.py
+|   `-- plot_roc_all_models.py
+|-- src/
+|   |-- data/
+|   |-- models/
+|   |-- training/
+|   |-- evaluation/
+|   |-- datasets/
+|   `-- interpretability/
+|-- thesis_documentation/
+|   |-- main.tex
+|   |-- chapters/
+|   `-- images/
+`-- pyproject.toml
+\end{verbatim}
+
+The active codebase lives under \texttt{src/}, while operational command-line workflows and supplementary utilities are stored under \texttt{scripts/}. Outputs produced by the pipeline are written under \texttt{artifacts/}, which contains both intermediate manifests and final model/evaluation products. The thesis itself is maintained in a separate \texttt{thesis\_documentation/} directory, allowing the written document to remain isolated from the core training and evaluation code.
+
+\section{Data Pipeline and Orchestration}
+
+Data preparation is implemented as a modular set of scripts under \texttt{src/data/}. The canonical run order is explicitly documented in \texttt{docs/runbook.md}. The main pipeline stages include:
+
+\begin{itemize}
+    \item cohort manifest generation,
+    \item frontal study selection,
+    \item emergency department linkage,
+    \item final ED cohort construction,
+    \item patient-level temporal split generation,
+    \item CheXpert-based pneumonia label generation,
+    \item pneumonia training-table construction,
+    \item triage linkage and triage feature construction,
+    \item final clinical and multimodal training-table assembly.
+\end{itemize}
+
+This staged design is important for reproducibility because each transformation step is represented explicitly in code and reflected in artifact outputs. Rather than training directly from ad hoc notebook state, the repository constructs reusable manifest and table files that can be inspected and audited independently of later training runs.
+
+Optional laboratory-oriented branches are also present in the codebase, but they are not part of the headline comparison reported in the thesis. The primary comparison in the main text is therefore restricted to triage-based clinical baselines, an image-only model, and a multimodal image-plus-triage model.
+
+\section{Model Training Components}
+
+The headline model families are implemented as separate training programs under \texttt{src/training/}. These include:
+
+\begin{itemize}
+    \item \texttt{train\_clinical\_baseline.py}
+    \item \texttt{train\_clinical\_xgb.py}
+    \item \texttt{train\_image\_multilabel\_pretrain.py}
+    \item \texttt{train\_image\_pneumonia\_finetune.py}
+    \item \texttt{train\_multimodal\_pneumonia.py}
+\end{itemize}
+
+This separation is useful because it preserves conceptual clarity: tabular-only baselines, image-only training, and multimodal fusion are treated as distinct experimental paths rather than merged into a single monolithic script.
+
+The canonical final run directories are also tracked in \texttt{artifacts/runs/registry.json}. The headline run directories are:
+
+\begin{itemize}
+    \item \texttt{artifacts/models/clinical\_baseline\_u\_ignore\_temporal\_strong\_v2}
+    \item \texttt{artifacts/models/clinical\_xgb\_u\_ignore\_temporal\_strong\_v2}
+    \item \texttt{artifacts/models/image\_pneumonia\_finetune\_densenet121\_u\_ignore\_temporal\_stronger\_lr\_v3}
+    \item \texttt{artifacts/models/multimodal\_pneumonia\_densenet121\_triage\_u\_ignore\_temporal\_stronger\_lr\_v3}
+\end{itemize}
+
+These directories store model-specific outputs such as configuration files, summaries, histories, serialized models or preprocessors, and prediction CSVs. This artifact-based structure is one of the strongest reproducibility features of the repository.
+
+\section{Frameworks and Libraries}
+
+The implementation stack is explicit both in the source imports and in the project configuration file. Core dependencies include:
+
+\begin{itemize}
+    \item pandas and numpy for dataframe and array processing,
+    \item pyarrow for parquet table handling,
+    \item scikit-learn for preprocessing, logistic regression, and evaluation utilities,
+    \item XGBoost for boosted-tree baselines,
+    \item PyTorch and torchvision for image and multimodal neural models,
+    \item Pillow / OpenCV-style image utilities,
+    \item matplotlib for plotting,
+    \item joblib for serialization.
+\end{itemize}
+
+This combination reflects the multimodal character of the project: classical machine learning is used for structured-data baselines, while deep learning is used for image and fused models.
+
+\section{Canonical Training Defaults}
+
+The neural model trainers share a common design philosophy but differ in important stage-specific defaults. These differences are relevant for implementation fidelity and interpretation of the saved artifacts.
+
+\subsection*{Multilabel image pretraining}
+The multilabel pretraining stage is implemented in \texttt{train\_image\_multilabel\_pretrain.py}. The default optimizer is AdamW, with separate parameter groups for the backbone and classifier. Learning rate scheduling uses \texttt{ReduceLROnPlateau}. Mixed-precision training is supported through automatic mixed precision (AMP), and gradient clipping is applied. The default training budget is 30 epochs with early stopping patience of 5 epochs. By default, model selection is based on validation masked loss (\texttt{val\_loss}), although alternative criteria such as validation micro-AUPRC are supported by configuration. This stage also uses the most extensive augmentation policy, including random horizontal flipping, small rotation, and mild Gaussian blur.
+
+\subsection*{Binary image fine-tuning}
+The pneumonia fine-tuning stage is implemented in \texttt{train\_image\_pneumonia\_finetune.py}. It uses AdamW, \texttt{ReduceLROnPlateau}, optional AMP, and gradient clipping in the same general style as pretraining. The default training budget is 40 epochs with early stopping patience of 10 epochs. Model selection is based on validation AUPRC (\texttt{val\_auprc}). Compared with pretraining, image augmentation is lighter and primarily consists of resize, normalization, and mild Gaussian blur. Positive class weighting is derived from the training split.
+
+\subsection*{Multimodal training}
+The multimodal stage is implemented in \texttt{train\_multimodal\_pneumonia.py}. The default optimizer is AdamW with separate learning-rate parameter groups for the image backbone and the non-backbone components. Scheduling uses \texttt{ReduceLROnPlateau}, AMP is supported, and gradient clipping is enabled. The default training budget is 30 epochs with early stopping patience of 8 epochs. Model selection is based on validation AUPRC. As in image fine-tuning, image preprocessing uses resize, normalization, and mild blur.
+
+\section{Architecture-Level Implementation Details}
+
+The clinical baselines are implemented through scikit-learn and XGBoost pipelines. The image model is based on DenseNet121. The multimodal model combines a DenseNet121 image backbone with a tabular multilayer perceptron and an early-fusion head.
+
+At the architecture level, the multimodal model uses:
+
+\begin{itemize}
+    \item a DenseNet121 image backbone producing a 1024-dimensional embedding,
+    \item a two-layer tabular MLP producing a 128-dimensional embedding,
+    \item concatenation of the two branches into a 1152-dimensional fused vector,
+    \item a fusion head that projects this fused representation through a hidden layer before final binary prediction.
+\end{itemize}
+
+This explicit dimensional structure is important because it shows that the multimodal system is not simply a vague ``combined model,'' but a specific early-fusion architecture whose representational balance is dominated by the image branch. This also helps explain why a strong radiograph encoder may carry most of the predictive burden in the final system.
+
+\section{Artifact Contract per Run Directory}
+
+The repository uses an artifact-based experiment structure rather than relying on transient training logs or notebook state. The exact file set differs by model family, but the canonical run directories follow a common pattern.
+
+\subsection*{Clinical runs}
+Clinical baseline directories typically contain:
+\begin{itemize}
+    \item model serialization files (for example \texttt{model.joblib}),
+    \item run summary files,
+    \item validation and test prediction CSV files.
+\end{itemize}
+
+\subsection*{Neural runs}
+Neural model directories typically contain:
+\begin{itemize}
+    \item \texttt{config.json},
+    \item \texttt{summary.json},
+    \item \texttt{history.json},
+    \item validation and test prediction CSV files,
+    \item checkpoint files when present in the saved run.
+\end{itemize}
+
+\subsection*{Multimodal-specific artifacts}
+In addition to the standard neural artifacts, the multimodal run also persists the fitted tabular preprocessor as:
+\begin{itemize}
+    \item \texttt{tabular\_preprocessor.joblib}
+\end{itemize}
+
+This artifact contract is important because it enables later evaluation to be performed from frozen outputs and fixed preprocessing state rather than from repeated retraining.
+
+\section{Reproducibility Mechanisms}
+
+Several explicit reproducibility mechanisms are present in the repository.
+
+First, the train/validation/test split is enforced in training scripts using the stored temporal split labels rather than recomputed on the fly. Second, seed-setting is implemented in the neural training code using Python, NumPy, and PyTorch random-state controls. Third, run metadata are saved to disk, including \texttt{config.json}, \texttt{summary.json}, and \texttt{history.json} for neural experiments. Fourth, validation and test predictions are written to CSV files, allowing later evaluation to be performed from frozen outputs instead of requiring retraining.
+
+Clinical models are serialized using joblib, and the multimodal pipeline also persists the train-fitted tabular preprocessor as \texttt{tabular\_preprocessor.joblib}. This is especially important because the multimodal branch combines neural image features with transformed tabular inputs; preserving the exact preprocessor ensures that evaluation and inference are consistent with the training-time transformation.
+
+At the trainer level, reproducibility is also strengthened by explicit optimizer definitions, deterministic split use, checkpoint persistence, AMP configuration stored in run configs, and gradient clipping implemented in the neural training loops. Together, these mechanisms make it possible to reconstruct not only final metrics but also the configuration logic that generated them.
+
+\section{Evaluation Utilities}
+
+Evaluation is implemented through dedicated scripts and modules rather than being embedded only inside training loops. The most important components include:
+
+\begin{itemize}
+    \item bootstrap evaluation for AUROC/AUPRC confidence intervals and paired comparisons,
+    \item calibration analysis for Brier score, ECE, MCE, and reliability diagrams,
+    \item decision curve analysis for net benefit and standardized net benefit,
+    \item abnormal-negative analysis for evaluating performance against non-pneumonia abnormalities,
+    \item Grad-CAM generation for qualitative inspection of model behavior.
+\end{itemize}
+
+This separation between training and post hoc evaluation is valuable for a thesis because it allows the reader to understand that the results chapter is not based on ad hoc manual inspection. Instead, a dedicated evaluation layer systematically computes each class of analysis from stored model outputs.
+
+\section{Evaluation Reproduction Contract}
+
+The evaluation pipeline operates on saved prediction files or saved checkpoints and uses consistent alignment logic across models.
+
+Bootstrap evaluation is performed at the patient level, with \texttt{subject\_id} as the resampling unit. For paired model comparisons, prediction files are aligned on \texttt{subject\_id} and, where available, \texttt{study\_id}. Canonical thesis analyses use 2{,}000 bootstrap replicates, as specified in the runbook, even though generic script defaults may differ. The bootstrap output also reports the fraction of replicates in which one model exceeds another; this quantity is descriptive and should not be interpreted as a formal \(p\)-value.
+
+Calibration analysis uses 10 equal-width bins over the unit interval and reports Brier score, expected calibration error (ECE), and maximum calibration error (MCE). Bootstrap uncertainty summaries are also supported for these metrics.
+
+Decision curve analysis is computed over threshold probabilities from 0.01 to 0.99 using 99 evenly spaced points. Both raw net benefit and standardized net benefit are produced. Threshold-specific metric tables are also written as intermediate outputs.
+
+These exact settings are important because they define the operational meaning of the evaluation outputs reported in the main text.
+
+\section{Hardware and Runtime Reporting}
+
+The repository contains partial but not comprehensive runtime-environment documentation. GPU-related evidence is present in configuration files and project documentation, with CUDA-enabled execution explicitly referenced. Batch size is also recorded in run configurations and command documentation. However, explicit RAM totals, CPU model names, epoch wall-clock times, and total training durations were not found as structured repository outputs.
+
+For the purposes of this thesis, this means that the implementation is well documented at the level of pipeline structure, configuration, and artifact persistence, but only partially documented at the level of hardware-performance telemetry. This limitation does not affect the reproducibility of the results themselves, but it does limit detailed reporting of computational cost.
+
+\section{Summary}
+
+Overall, the software architecture of the repository reflects the broader methodological emphasis of the thesis: clear staging, explicit artifact persistence, controlled experiment configuration, and evaluation from saved outputs. The codebase is therefore not only a means of producing the reported experiments, but also an important part of the thesis contribution in its own right, because it operationalizes the principles of temporal validity, reproducibility, and fair multimodal comparison.

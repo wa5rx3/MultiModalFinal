@@ -1,0 +1,4 @@
+mimic_cxr_root: "D:/mimic_data"
+mimic_iv_root: "D:/mimic_iv"
+mimic_iv_ed_root: "D:/mimic_iv_ed"
+labevents_dir: "D:/mimic_iv/labevents"
