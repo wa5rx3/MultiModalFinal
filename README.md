@@ -1,71 +1,142 @@
-# Multimodal Pneumonia Detection (MIMIC-CXR + MIMIC-IV / MIMIC-IV-ED)
+# Multimodal Pneumonia Detection — MIMIC-CXR + MIMIC-IV/ED
 
-BSc thesis codebase for publication-oriented, time-safe **multimodal pneumonia detection** from chest X-rays and structured ED/clinical data.
+BSc thesis codebase. Investigates whether combining chest X-rays with structured ED triage data improves pneumonia detection over image-alone, using a time-safe cohort anchored at the moment of CXR acquisition (t₀).
 
-## What this repo contains
+**Data:** MIMIC-CXR-JPG v2.1.0 + MIMIC-IV-ED (PhysioNet, credentialed access required)
+**Backbone:** DenseNet121, pretrained on multilabel CheXpert labels, fine-tuned for binary pneumonia
+**Cohort:** 9,137 ED-anchored studies · 80/10/10 patient-level temporal split · test *n* = 1,075
 
-- **`src/`** — cohort pipelines (`src/data/`), datasets, models, training CLIs (`src/training/`), QC (`src/qc/`), **evaluation** (`src/evaluation/`: patient-level bootstrap CIs; **`repair_prediction_ids.py`** for legacy ID-less image CSVs — current image/multimodal trainers write IDs in-batch). Ad-hoc **prediction distribution / threshold reports**: **`scripts/check_prediction_behavior.py`** (see **`docs/runbook.md` §4.8**, **`docs/current_state.md` §16.8**).
-- **`artifacts/`** — derived tables, training manifests, model runs, and logs. See **`artifacts/models/README.md`** for canonical vs secondary model dirs.
-- **`configs/`** — `paths.local.example.yaml` (copy to `paths.local.yaml` for machine-specific roots) and **`configs/experiments/*.yaml`** documenting hyperparameters for headline runs. Training scripts currently use **argparse**; YAML files are the **reference spec** until optional loader wiring.
-- **`tools/audits/`** — ad-hoc consistency / profiling scripts (not part of the training pipeline).
-- **`pyproject.toml`** — package metadata and Python dependencies (`pip install -e .` or `uv pip install -e .`).
+---
 
-## Documentation (read these first)
+## Key Results
 
-| Doc | Role |
-|-----|------|
-| **[`docs/current_state.md`](docs/current_state.md)** | Single source of truth: cohorts, tables, **results**, limitations, next steps |
-| **[`docs/runbook.md`](docs/runbook.md)** | Ordered pipeline and training commands |
-| [`docs/data_versions.md`](docs/data_versions.md) | Dataset locations, **canonical vs secondary vs archived** artifacts |
-| [`docs/cohort_definition.md`](docs/cohort_definition.md) | Cohort and split policy |
-| [`docs/triage_feature_policy.md`](docs/triage_feature_policy.md) | Triage feature allowlist and leakage rules |
-| [`docs/project_definition.md`](docs/project_definition.md) | Goals and high-level status |
+All metrics on the held-out test set (temporal split, `u_ignore` label policy). Bootstrap CIs are patient-level paired, *n* = 2,000 replicates.
 
-## Headline results (canonical runs, temporal `u_ignore`, 9,137 studies, test *n* = 1,075)
+| Model | AUROC | AUPRC | ECE |
+|---|---|---|---|
+| Clinical Logistic Regression | 0.606 | 0.548 | 0.037 |
+| Clinical XGBoost | 0.611 | 0.567 | 0.046 |
+| Image-only (DenseNet121) | **0.746** | **0.724** | 0.067 |
+| Multimodal — Concat MLP | 0.736 | 0.714 | **0.040** |
+| Multimodal — Attention Fusion | 0.737 | 0.710 | 0.132 |
 
-**Canonical model dirs** under `artifacts/models/` (see **`artifacts/models/README.md`**): **`clinical_*_strong_v2`**, **`image_pneumonia_finetune_*_stronger_lr_v3`**, **`multimodal_*_stronger_lr_v3`**, plus upstream **`image_multilabel_pretrain_densenet121_strong_v2`**. Older runs live in **`artifacts/archive/models/from_models_root_2026_03/`**.
+**Primary finding:** The multimodal model does not significantly outperform image-only (ΔAUROC = −0.009, 95% CI [−0.023, +0.005], P(Δ>0) = 0.10). Its advantage is **calibration**: ECE 0.040 vs 0.067. Both deep learning models substantially and significantly outperform clinical baselines (P(Δ>0) = 1.0 for both comparisons).
 
-**Point estimates** (test set) from `metrics.json` / `summary.json`:
+**Non-ED generalisation (internal check only):** Image model on non-ED MIMIC-CXR (n = 9,589): AUROC 0.534, 95% CI [0.520, 0.548]. The DenseNet backbone was pretrained on this population — this is not an independent external validation.
 
-- **Clinical logistic (`clinical_baseline_u_ignore_temporal_strong_v2`):** AUROC **0.606**, AUPRC **0.548**
-- **Clinical XGB (`clinical_xgb_u_ignore_temporal_strong_v2`):** AUROC **0.611**, AUPRC **0.567**
-- **Image-only (`image_pneumonia_finetune_densenet121_u_ignore_temporal_stronger_lr_v3`):** AUROC **0.746**, AUPRC **0.724**
-- **Multimodal (`multimodal_pneumonia_densenet121_triage_u_ignore_temporal_stronger_lr_v3`):** AUROC **0.736**, AUPRC **0.714**
+Full metrics, bootstrap CIs, and calibration statistics: [`artifacts/evaluation/final_publication_report.json`](artifacts/evaluation/final_publication_report.json)
 
-**Patient-level bootstrap** (*n* = 2000, seed 42): `artifacts/evaluation/bootstrap_*_stronger_lr_v3.json` (multimodal vs image, image/multimodal vs clinical XGB, image vs XGB). Historical phase1 bootstrap JSONs and figures were moved to **`artifacts/archive/evaluation/from_evaluation_root_2026_03/`**.
+---
 
-Commands: **`docs/runbook.md`**. Extended narrative and caveats: **`docs/current_state.md`** (includes older §9 history; align new writing with canonical dirs above).
+## Repository Structure
 
-## Local setup
-
-1. Python ≥ 3.10, CUDA optional but recommended for image runs.
-2. `pip install -e .` from the repo root (or install dependencies from `pyproject.toml`).
-3. Copy `configs/paths.local.example.yaml` → `configs/paths.local.yaml` and set your MIMIC roots (file is gitignored).
-4. Run steps in **`docs/runbook.md`** with `PYTHONPATH=.` (or install the package editable and use `python -m` if you add module entrypoints later).
-
-## Streamlit dashboard
-
-You can launch a lightweight project dashboard to inspect run metrics and bootstrap outputs:
-
-```bash
-streamlit run streamlit_app.py
+```
+├── src/
+│   ├── data/           # Cohort construction & feature engineering (19 scripts)
+│   ├── datasets/       # PyTorch Dataset classes (binary, multilabel, multimodal)
+│   ├── models/         # Model architectures (DenseNet121, TabularMLP, fusion)
+│   ├── training/       # Training CLIs for all model types
+│   ├── evaluation/     # Bootstrap, calibration, decision curve analysis
+│   ├── interpretability/ # SHAP, Grad-CAM
+│   └── qc/             # Data quality checks
+│
+├── scripts/            # Figure generation, SHAP, publication report
+├── configs/
+│   ├── experiments/    # Hyperparameter configs for headline runs
+│   └── paths.local.example.yaml  # Copy → paths.local.yaml, set MIMIC roots
+│
+├── artifacts/
+│   ├── evaluation/     # Bootstrap JSONs, calibration plots, SHAP figures,
+│   │                   # ablation table, final_publication_report.json
+│   ├── interpretability/ # Grad-CAM heatmaps (true positives, false negatives)
+│   └── models/         # config.json + metrics.json per model run
+│                       # (weights not committed — see Reproducibility below)
+│
+├── Dockerfile          # pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime base
+├── Makefile            # Full pipeline: make all
+└── streamlit_app.py    # Lightweight dashboard for inspecting run metrics
 ```
 
-The app reads:
-- `artifacts/runs/registry.json`
-- model `metrics.json` / `summary.json` referenced in the registry
-- `artifacts/evaluation/bootstrap*.json`
+---
 
-## Artifacts and reproducibility
+## Evaluation Artifacts
 
-- **Canonical** model outputs live under **`artifacts/models/`** (see `artifacts/models/README.md`).
-- **Sensitivity / smoke / abandoned** runs are under **`artifacts/archive/`** (see `.gitignore` — this subtree may be **local-only** in some clones).
-- Neural **checkpoints** (`.pt`) are often **gitignored**; committed evidence is typically `config.json`, `history.json`, `summary.json`, and prediction CSVs where present. Multimodal runs also need **`tabular_preprocessor.joblib`** paired with the checkpoint.
-- **`artifacts/runs/registry.json`** — index of headline model runs (paths to metrics/summary files); extend with git SHA and commands as needed.
-- **`artifacts/evaluation/`** — bootstrap JSON (and optional CSV replicates) from `bootstrap_eval.py`; calibration under **`calibration_stronger_lr_v3/`**; DCA under **`dca/`**; per-model **`prediction_behavior_*`** folders from `scripts/check_prediction_behavior.py`; CheXpert-stratified summaries **`image_normal_vs_abnormal_negatives_stronger_lr_v3.json`** / **`multimodal_normal_vs_abnormal_negatives_stronger_lr_v3.json`** from `scripts/evaluate_normal_vs_abnormal_negatives.py`; rounded table + note **`final_results_table.csv`**, **`final_result_note.txt`**. Create the directory when you first save results.
-- **Calibration tooling:** `src/evaluation/calibration_analysis.py` — default model map targets the **canonical** `strong_v2` / `stronger_lr_v3` prediction CSVs; latest committed run output: **`artifacts/evaluation/calibration_stronger_lr_v3/`**. Older calibration outputs: **`artifacts/archive/evaluation/from_evaluation_root_2026_03/calibration_phase1_default/`**.
-- **Decision curve analysis:** `src/evaluation/decision_curve_analysis.py` (pass `--model` paths explicitly). Previous DCA exports: **`artifacts/archive/evaluation/from_evaluation_root_2026_03/dca_mixed_pre_canonical/`**.
+Everything needed to verify the thesis numbers is in `artifacts/evaluation/`:
+
+| File / Directory | Contents |
+|---|---|
+| `final_publication_report.json` | All locked metrics: AUROC, AUPRC, ECE, Brier, bootstrap CIs, pairwise ΔAUROCs |
+| `bootstrap_*.json` | Paired bootstrap outputs for each model comparison |
+| `calibration_final/` | Reliability diagrams + ECE/Brier/H-L statistics |
+| `feature_ablation_results.csv` | AUROC across 16 feature ablation configurations |
+| `shap/` | SHAP beeswarm + bar charts; top feature: O₂ saturation (mean |SHAP| = 0.148) |
+| `interpretability/gradcam_val_fn/` | Grad-CAM overlays for false-negative cases |
+
+---
+
+## Design Decisions
+
+**t₀ anchor:** CXR acquisition datetime (DICOM StudyDate + StudyTime). All clinical features are ED triage intake measurements — structurally preceding imaging. No post-t₀ features.
+
+**Label policy:** CheXpert uncertain labels treated as negative (`u_ignore` = exclude uncertain studies from training). Sensitivity to this choice tested via `u_zero` and `u_one` variants.
+
+**Split:** Patient-level ordinal rank by first t₀. Each patient belongs to exactly one split. No patient-level leakage.
+
+**Fusion:** Concat MLP (DenseNet image embedding + TabularMLP embedding → joint head). Attention fusion tested as ablation — similar AUROC but severely miscalibrated (ECE 0.132).
+
+---
+
+## Reproducing the Pipeline
+
+### Requirements
+
+```bash
+pip install -r requirements.txt
+# or: pip install -e .
+```
+
+MIMIC data requires PhysioNet credentialed access. Once downloaded, copy and fill in the paths config:
+
+```bash
+cp configs/paths.local.example.yaml configs/paths.local.yaml
+# edit paths.local.yaml with your local MIMIC roots
+```
+
+### Pipeline
+
+```bash
+make pretrain           # DenseNet121 multilabel pretraining on MIMIC-CXR
+make finetune_image     # Binary pneumonia fine-tuning (image-only)
+make finetune_multimodal  # Multimodal (image + triage vitals)
+make train_clinical     # Logistic regression + XGBoost baselines
+make evaluate           # Bootstrap, calibration, feature ablation
+make shap               # SHAP values for clinical XGBoost
+make report             # Aggregate final_publication_report.json
+```
+
+Or run the full pipeline end-to-end:
+
+```bash
+make all
+```
+
+### Docker
+
+```bash
+docker build -t multimodal-pneumonia .
+docker run --gpus all \
+  -v /path/to/mimic_cxr_jpg:/workspace/mimic_cxr_jpg:ro \
+  -v /path/to/mimic_iv_ed:/workspace/mimic_iv_ed:ro \
+  -v /path/to/artifacts:/workspace/artifacts \
+  multimodal-pneumonia make all
+```
+
+### Model Weights
+
+Trained model weights (`.pt` checkpoints, ~800 MB–1.2 GB each) are not stored in this repository. To inspect or run inference with the trained models, contact the author.
+
+---
 
 ## Compliance
 
-PhysioNet credentialing applies to MIMIC data. Do not commit raw patient-level exports or credentials.
+This project uses MIMIC-CXR-JPG v2.1.0, MIMIC-IV, and MIMIC-IV-ED under the PhysioNet Credentialed Health Data License. No patient-level data is included in this repository. Researchers wishing to reproduce results must complete PhysioNet credentialing at [physionet.org](https://physionet.org).
